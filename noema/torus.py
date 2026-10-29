@@ -31,7 +31,7 @@ def reference_advance(positions, velocities, size):
 def advance(positions, velocities, size):
     """The next positions, for whole batches at once: positions and velocities (..., d), as for
     reference_advance. The result is int64, shaped like the two broadcast together."""
-    raise NotImplementedError("Lilly writes this one: it is one line")
+    return (np.asarray(positions, dtype=np.int64)+ np.asarray(velocities, dtype=np.int64)) % size
 
 def trajectory(starts, velocities, steps, size, advance_fn=None):
     """The positions of each particle over time: (..., steps, d), the first of them the start.
