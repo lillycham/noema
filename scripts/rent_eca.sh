@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # One rental on a 5090: the cellular automaton runs, RoPE against learned positions.
 #
+# For the 2D world: TRAIN=noema.train_2d PREFIX=world2d STEPS=6000 scripts/rent_eca.sh
+#
 # On the rented machine, from the repo root after cloning. A 5090 needs CUDA 12.8 or newer, so use a
 # PyTorch image like pytorch/pytorch:2.8.0-cuda12.9-cudnn9-runtime (it worked, with a 20 GB disk):
 #   nohup scripts/rent_eca.sh > logs/rent.log 2>&1 < /dev/null &
@@ -20,7 +22,9 @@ SMOKE_STEPS=${SMOKE_STEPS:-100}
 SEEDS=${SEEDS:-"0 1"}
 VARIANTS=${VARIANTS:-"rope positions"}  # rope: RoPE. positions: a learned table in its place
 PIP=${PIP:-1}                           # 0: the packages are there already (the Mac)
-EXTRA=${EXTRA:-}                        # more arguments for train_eca, e.g. "--radius 2" or "--emb 32 --heads 2 --layers 2"
+EXTRA=${EXTRA:-}                        # more arguments for the training script, e.g. "--radius 2" or "--emb 32 --heads 2 --layers 2"
+TRAIN=${TRAIN:-noema.train_eca}         # the training module: noema.train_eca, or noema.train_2d
+PREFIX=${PREFIX:-eca}                   # what it calls its checkpoints: eca, or world2d
 
 set -u
 cd "$(dirname "$0")/.."
@@ -57,7 +61,7 @@ step() {    # step NAME OUTPUT COMMAND...: run COMMAND, unless OUTPUT exists (""
     fi
 }
 
-flags_for() {   # the train_eca flags of a variant
+flags_for() {   # the training flags of a variant
     case $1 in
         rope) echo "" ;;
         positions) echo "--learned-positions" ;;
@@ -68,14 +72,14 @@ flags_for() {   # the train_eca flags of a variant
 # ---------- setup and checks ----------
 if [ "$PIP" = 1 ]; then step pip "" pip install -q -r requirements.txt; fi
 step tests "" python -m pytest -q
-step smoke "" python -m noema.train_eca --steps "$SMOKE_STEPS" --log-every $((SMOKE_STEPS / 2)) --tag smoke $COMPILE $EXTRA
+step smoke "" python -m "$TRAIN" --steps "$SMOKE_STEPS" --log-every $((SMOKE_STEPS / 2)) --tag smoke $COMPILE $EXTRA
 
 # ---------- the runs: seed 0 for every variant first, so a partial result is still a fair comparison ----------
 for seed in $SEEDS; do
     for variant in $VARIANTS; do
         tag=${variant}_s$seed
-        step "run_$tag" "checkpoints/eca_$tag.pt" \
-            python -m noema.train_eca --steps "$STEPS" --seed "$seed" --tag "$tag" $(flags_for "$variant") $COMPILE $EXTRA
+        step "run_$tag" "checkpoints/${PREFIX}_$tag.pt" \
+            python -m "$TRAIN" --steps "$STEPS" --seed "$seed" --tag "$tag" $(flags_for "$variant") $COMPILE $EXTRA
     done
 done
 
@@ -85,7 +89,7 @@ for seed in $SEEDS; do
     for variant in $VARIANTS; do
         log="$LOG/rent_run_${variant}_s$seed.log"
         [ -f "$log" ] || continue
-        { echo "== $variant, seed $seed"; grep "^step" "$log" | tail -1; grep "^accuracy by row" "$log"; echo; } >> "$SUMMARY"
+        { echo "== $variant, seed $seed"; grep "^step" "$log" | tail -1; grep "^accuracy by" "$log"; echo; } >> "$SUMMARY"
     done
 done
 echo "$(date +%H:%M:%S) all done: see $SUMMARY" | tee -a "$STATUS"
