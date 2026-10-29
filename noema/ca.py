@@ -8,9 +8,13 @@ the next state of a cell with neighbourhood n is bit n of the rule number.
     rule 170 = 0b10101010   n odd gives 1 (the right neighbour is 1): the row shifts left
     rule 90  = 0b01011010   left XOR right: from a single 1, a Sierpinski triangle
 
-The step is the one function in this file that is yours to write. reference_step() below is the
-slow, obviously correct version, one cell at a time. tests/test_ca.py checks yours against it for
-all 256 rules.
+A cell can look further than one place each way. The radius is how far: a neighbourhood is
+2*radius + 1 cells, and a rule is 2^(2*radius + 1) bits. Radius 1 is the automaton above. Radius 2
+has 32-bit rules, so 2^32 of them, and is the largest radius whose rule numbers fit in a numpy integer.
+
+step() is the fast version, for whole batches of rows at once. reference_step() is the slow,
+obviously correct one, a cell at a time. tests/test_ca.py checks step() against it: for all 256
+rules at radius 1, and for random 32-bit rules at radius 2.
 
 Rows are numpy arrays of 0 and 1 with the cells on the last axis, and any axes in front are a
 batch. In a batch, every row can have its own rule.
@@ -71,11 +75,9 @@ def equivalent_rules(rule, radius=1):
 
 def rollout(first, rules, n_rows, step_fn=None, radius=1):
     """first (..., W) and its n_rows - 1 successors, stacked: (..., n_rows, W).
-    step_fn is step by default. Pass reference_step to use the slow version.
-    From radius 2 on, step_fn gets the radius as a third argument."""
+    step_fn is step by default. Pass reference_step to use the slow version."""
     step_fn = step_fn or step
-    extra = () if radius == 1 else (radius,)
     rows = [np.asarray(first)]
     for _ in range(n_rows - 1):
-        rows.append(step_fn(rows[-1], rules, *extra))
+        rows.append(step_fn(rows[-1], rules, radius))
     return np.stack(rows, axis=-2)
