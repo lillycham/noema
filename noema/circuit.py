@@ -42,10 +42,10 @@ def all_patterns(model, X):
     return got
 
 @contextlib.contextmanager
-def zeroed(model, layer, *heads):
-    """Inside the block, the heads of that layer write nothing: their output is zero before the
-    output projection. The weights are not touched. (Blocks for one layer don't nest: name every
-    head of the layer in one call.)"""
+def edited(model, layer, edit):
+    """Inside the block, edit(out) is applied to what the heads of that layer write: out is
+    (B, heads, T, head size), before the output projection, and edit returns the tensor to use. The
+    weights are not touched. (Blocks for one layer don't nest: do all the edits of a layer in one.)"""
     attn = model.blocks[layer].attn
     original = attn.forward
 
@@ -53,8 +53,7 @@ def zeroed(model, layer, *heads):
         B, T, C = x.shape
         q, k, v = (t.view(B, T, attn.heads, -1).transpose(1, 2) for t in attn.qkv(x).split(C, dim=-1))
         q, k = attn.rotate(attn.q_norm(q), attn.k_norm(k))
-        out = torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=True)
-        out[:, list(heads)] = 0
+        out = edit(torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=True))
         return attn.proj(out.transpose(1, 2).reshape(B, T, C))
 
     attn.forward = forward
@@ -62,6 +61,15 @@ def zeroed(model, layer, *heads):
         yield
     finally:
         attn.forward = original
+
+def zeroed(model, layer, *heads):
+    """Inside the block, the heads of that layer write nothing: their output is zero before the
+    output projection. Name every head of the layer in one call."""
+    def edit(out):
+        out = out.clone()
+        out[:, list(heads)] = 0
+        return out
+    return edited(model, layer, edit)
 
 def transition_ids(grid, radius):
     """For each token position of a rollout (B, rows, W) laid out as tokens: the neighbourhood number
