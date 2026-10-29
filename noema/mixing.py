@@ -55,7 +55,9 @@ def reference_advance(positions, velocities, turns, size):
 def advance(positions, velocities, turns, size):
     """(next positions, next velocities), for whole batches at once: positions and velocities (..., d),
     turns (..., d, d), as for reference_advance. Both results are int64."""
-    raise NotImplementedError("Lilly writes this one")
+    positions, velocities = np.broadcast_arrays(np.asarray(positions, dtype=np.int64), np.asarray(velocities, dtype=np.int64))
+    turned = np.einsum("...jk,...k->...j", np.asarray(turns, dtype=np.int64), velocities)
+    return (positions + velocities) % size, turned % size
 
 def trajectory(starts, velocities, turns, steps, size, advance_fn=None):
     """The positions of each particle over time: (..., steps, d), the first of them the start.
