@@ -30,14 +30,22 @@ from noema import ca
 CELLS = ((-1, 0), (0, -1), (0, 0), (0, 1), (1, 0))       # (row, column) offsets: up, left, itself, right, down
 
 def step(grids, rules):
-    """The next grids. Yours to write.
+    grids = np.asarray(grids)
+    rules = np.broadcast_to(
+        np.asarray(rules, dtype=np.int64),
+        grids.shape[:-2],
+    )
 
-    Hints: the neighbourhood number is built in 1D by shifting the whole row and shifting bits in,
-    one offset at a time. Here the shifts are along two axes: np.roll(grids, 1, axis=-2) brings the
-    cell above each cell to that cell. Go through CELLS in order, so up gets the highest weight, and
-    the new cell is bit n of the rule, as in ca.step().
-    """
-    raise NotImplementedError("step() in ca2d.py is yours to write")
+    n = np.zeros(grids.shape, dtype=np.int64)
+
+    for di, dj in CELLS:
+        n = (n << 1) | np.roll(
+            grids, shift=(-di, -dj), axis=(-2, -1)
+        ).astype(np.int64)
+
+    return (
+        np.right_shift(rules[..., None, None], n) & 1
+    ).astype(grids.dtype)
 
 def reference_step(grids, rules):
     """The slow version of step(): one cell at a time, with the definition written out."""
