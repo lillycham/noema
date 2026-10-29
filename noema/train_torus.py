@@ -3,10 +3,12 @@
     python -m noema.train_torus --steps 3000 --tag first
 
 Every sequence has its own hidden velocity and random start (see torus.py). The model sees only
-coordinate tokens and a separator after each step, and has to work out the velocity from the
-steps so far. Whole velocities are held out of training, about 1 in 16. The loop is the one in
-train_eca.py: only the data and the scoring are different. Saves the weights in checkpoints/ for
-the probes of probe.py.
+coordinate tokens and a separator after each step, and has to work out the velocity from the steps
+so far. Whole velocities are held out of training, about 1 in 16.
+
+With --mixing the velocity also turns every step by a hidden turn, a signed permutation of the axes
+(see mixing.py), and whole turns are held out, 1 in 4. The loop is the one in train_eca.py: only
+the data and the scoring are different. Saves the weights in checkpoints/ for the probes of probe.py.
 """
 import argparse
 import time
@@ -15,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from noema import data_torus as dt, gpt, torus
+from noema import data_mixing as dm, data_torus as dt, gpt, mixing, torus
 from noema.train_eca import default_device, lr_at, row_curve, train_step
 
 @torch.no_grad()
@@ -33,9 +35,27 @@ def score(model, X, mask, dim, size):
                for t in range(1, X.shape[1] // stride)]
     return loss, np.array(by_step)
 
-def fixed_batch(velocities, seed, B, args, advance_fn=None):
-    X, _ = dt.trajectory_batch(np.random.default_rng(seed), B, velocities, args.size, args.dim, args.steps_per_seq, advance_fn)
-    return torch.from_numpy(X).to(args.device)
+class World:
+    """What a run is trained on: batch(rng, B, held) -> tokens (B, L), the held-out part if held, and
+    ideal(X) -> the ideal learner's accuracy by step on a batch of tokens X."""
+
+    def __init__(self, args):
+        size, dim, steps = args.size, args.dim, args.steps_per_seq
+        if args.mixing:
+            self.pieces = dm.TurnSet(dim)
+            advance_fn = mixing.reference_advance if args.slow_world else None
+            self.batch = lambda rng, B, held: dm.trajectory_batch(
+                rng, B, self.pieces.held if held else self.pieces.train, size, dim, steps, advance_fn)[0]
+            self.ideal = lambda X: dm.ideal_accuracy_by_step(dt.decode(X, dim), self.pieces.group, size)
+        else:
+            self.pieces = dt.VelocitySet(size, dim)
+            advance_fn = torus.reference_advance if args.slow_world else None
+            self.batch = lambda rng, B, held: dt.trajectory_batch(
+                rng, B, self.pieces.held if held else self.pieces.train, size, dim, steps, advance_fn)[0]
+            self.ideal = lambda X: dt.ideal_accuracy_by_step(steps, size)
+
+def fixed_batch(world, seed, B, args, held):
+    return torch.from_numpy(world.batch(np.random.default_rng(seed), B, held)).to(args.device)
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -51,18 +71,18 @@ def main():
     p.add_argument("--steps-per-seq", type=int, default=dt.STEPS, help="positions in a sequence (default 12)")
     p.add_argument("--learned-positions", action="store_true", help="a position table in place of RoPE")
     p.add_argument("--no-qk-norm", action="store_true")
-    p.add_argument("--slow-world", action="store_true", help="use torus.reference_advance")
+    p.add_argument("--mixing", action="store_true", help="the world of mixing.py: the velocity turns every step")
+    p.add_argument("--slow-world", action="store_true", help="use the reference step of the world (torus.reference_advance, or mixing.reference_advance)")
     p.add_argument("--compile", action="store_true", help="train through torch.compile: for CUDA")
     p.add_argument("--log-every", type=int, default=250)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--tag", default="torus")
     p.add_argument("--device", default=default_device())
     args = p.parse_args()
-    advance_fn = torus.reference_advance if args.slow_world else None
 
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
-    vels = dt.VelocitySet(args.size, args.dim)
+    world = World(args)
     L = args.steps_per_seq * (args.dim + 1)
     cfg = gpt.Config(vocab=args.size + 1, block=L, emb=args.emb, heads=args.heads, layers=args.layers,
                      rope=not args.learned_positions, qk_norm=not args.no_qk_norm)
@@ -72,10 +92,10 @@ def main():
     net = torch.compile(model) if args.compile else model
     opt = torch.optim.AdamW(gpt.param_groups(model, args.wd), lr=args.lr, betas=(0.9, 0.95))
     mask = torch.from_numpy(dt.target_mask(L, args.dim)).to(args.device)
-    seen = fixed_batch(vels.train, 1, 512, args, advance_fn)
-    unseen = fixed_batch(vels.held, 2, 512, args, advance_fn)
-    ideal = dt.ideal_accuracy_by_step(args.steps_per_seq, args.size)
-    print(f"{gpt.n_parameters(model):,} parameters on {args.device}; torus {args.size}^{args.dim}, "
+    seen = fixed_batch(world, 1, 512, args, held=False)
+    unseen = fixed_batch(world, 2, 512, args, held=True)
+    ideal = world.ideal(seen.cpu().numpy())
+    print(f"{gpt.n_parameters(model):,} parameters on {args.device}; {'mixing' if args.mixing else 'torus'} {args.size}^{args.dim}, "
           f"{args.steps_per_seq} steps, {L} tokens; {cfg}", flush=True)
     print(f"ideal learner, by step:  {row_curve(ideal)}  (mean {ideal.mean():.3f})", flush=True)
 
@@ -84,11 +104,11 @@ def main():
         if step % args.log_every == 0 or step == args.steps:
             loss, acc = score(net, seen, mask, args.dim, args.size)
             loss_h, acc_h = score(net, unseen, mask, args.dim, args.size)
-            print(f"step {step:5d}  val loss {loss:.4f}  acc {acc.mean():.3f}  | held-out velocities: "
+            print(f"step {step:5d}  val loss {loss:.4f}  acc {acc.mean():.3f}  | held-out: "
                   f"loss {loss_h:.4f}  acc {acc_h.mean():.3f}  ({time.time() - t:.0f}s)", flush=True)
         if step == args.steps:
             break
-        X, _ = dt.trajectory_batch(rng, args.batch, vels.train, args.size, args.dim, args.steps_per_seq, advance_fn)
+        X = world.batch(rng, args.batch, held=False)
         train_step(net, opt, torch.from_numpy(X).to(args.device), mask, lr_at(step, args.steps, args.lr, args.warmup))
 
     print(f"\nideal learner, by step:         {row_curve(ideal)}")
@@ -96,8 +116,9 @@ def main():
     print(f"accuracy by step, held out:     {row_curve(acc_h)}")
     Path("checkpoints").mkdir(exist_ok=True)
     torch.save({"config": cfg.__dict__, "weights": model.state_dict(), "size": args.size, "dim": args.dim,
-                "steps": args.steps_per_seq}, Path("checkpoints") / f"torus_{args.tag}.pt")
-    print(f"\nSaved checkpoints/torus_{args.tag}.pt")
+                "steps": args.steps_per_seq, "mixing": args.mixing},
+               Path("checkpoints") / f"{'mixing' if args.mixing else 'torus'}_{args.tag}.pt")
+    print(f"\nSaved checkpoints/{'mixing' if args.mixing else 'torus'}_{args.tag}.pt")
 
 if __name__ == "__main__":
     main()
