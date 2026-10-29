@@ -88,3 +88,38 @@ def test_ideal_learner_on_random_radius_2_rules_climbs_with_the_rows():
     assert (ideal >= 0.5).all() and (ideal <= 1.0).all()
     assert ideal[0] < 0.75 and ideal[-1] > 0.9 and ideal[-1] > ideal[0] + 0.2
     assert (np.diff(ideal) > -0.02).all()                       # the rows never tell it less than before
+
+# ---------- the ideal learner, free-running ----------
+def radius_2_grid(B=32, seed=0):
+    rs = data.RuleSet(2)
+    X, _ = data.rollout_batch(np.random.default_rng(seed), B, rs.train, radius=2)
+    return tokens.decode(X, W)
+
+def test_free_running_ideal_keeps_the_prompt_and_is_exact_when_nothing_is_unknown():
+    grid = np.zeros((3, R, W), dtype=np.uint8)
+    out = evaluate.ideal_free_running(grid, 3, 1)
+    assert out.shape == grid.shape and np.array_equal(out, grid)
+    grid = radius_2_grid()
+    out = evaluate.ideal_free_running(grid, 3, 2)
+    assert np.array_equal(out[:, :3], grid[:, :3])
+
+def test_free_running_ideal_writes_one_rule_whatever_it_guessed():
+    """Rows t - 1 to t, prompt included, all follow a single table: a neighbourhood gets one cell."""
+    out = evaluate.ideal_free_running(radius_2_grid(), 3, 2)
+    for rows in out:
+        nb = evaluate.neighbourhoods(rows[:-1], 2).ravel()
+        seen = {}
+        for k, cell in zip(nb.tolist(), rows[1:].ravel().tolist()):
+            assert seen.setdefault(k, cell) == cell
+
+def test_free_running_ideal_is_the_same_for_the_same_seed():
+    grid = radius_2_grid()
+    a = evaluate.ideal_free_running(grid, 3, 2, np.random.default_rng(1))
+    b = evaluate.ideal_free_running(grid, 3, 2, np.random.default_rng(1))
+    assert np.array_equal(a, b)
+
+def test_free_running_ideal_drifts_on_radius_2_but_not_at_the_start():
+    grid = radius_2_grid(128)
+    wrong = evaluate.wrong_by_row(evaluate.ideal_free_running(grid, 3, 2), grid)
+    assert wrong.shape == (R,) and (wrong[:3] == 0).all()
+    assert 0.05 < wrong[3] < 0.45 and wrong[-1] > wrong[3]

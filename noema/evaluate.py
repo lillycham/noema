@@ -72,3 +72,32 @@ def ideal_accuracy_by_row(grid, radius=1):
                 known[t, b, i] = nb[b, t, i] in met
                 met.add(nb[b, t, i])                                    # the cell just written
     return (0.5 + 0.5 * known).mean(axis=(1, 2))
+
+def ideal_free_running(grid, prompt_rows, radius=1, rng=None):
+    """What an ideal table-lookup learner writes when it carries on alone from the first prompt_rows
+    rows of grid (B, n, W), and nothing else: an array shaped like grid, the prompt then its rows.
+
+    It builds its table from the transitions between the prompt rows. It writes a row cell by cell
+    from the row it wrote before. A cell whose neighbourhood number is in the table is certain. Any
+    other is a fair coin, and the coin is kept in the table so the learner agrees with itself. It is
+    never shown the truth again, so it cannot learn from its mistakes. That is the model's position
+    too, so this is the curve for a free-running model to be held against, as ideal_accuracy_by_row
+    is for a teacher-forced one.
+    """
+    rng = rng or np.random.default_rng(0)
+    grid = np.asarray(grid)
+    B, n, W = grid.shape
+    out = grid.copy()
+    nb = neighbourhoods(grid[:, :prompt_rows - 1], radius)             # the prompt's transitions, as read
+    for b in range(B):
+        table = {int(k): int(v) for k, v in zip(nb[b].ravel(), grid[b, 1:prompt_rows].ravel())}
+        for t in range(prompt_rows, n):
+            for i, k in enumerate(neighbourhoods(out[b, t - 1], radius).tolist()):
+                if k not in table:
+                    table[k] = int(rng.integers(2))
+                out[b, t, i] = table[k]
+    return out
+
+def wrong_by_row(written, truth, first=0):
+    """The share of cells that differ from the truth, row by row from row first: (B, n, W) twice."""
+    return (np.asarray(written) != np.asarray(truth))[:, first:].mean(axis=(0, 2))
