@@ -6,3 +6,4 @@ checkpoints/
 runs/
 *.log
 .DS_Store
+logs/

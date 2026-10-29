@@ -1,0 +1,4 @@
+# For a machine without Nix, such as a rented GPU. torch comes with the PyTorch image there.
+numpy
+matplotlib
+pytest

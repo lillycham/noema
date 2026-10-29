@@ -46,6 +46,14 @@ is the same automaton as 124, 137 and 193. The 256 rules are 88 classes. A split
 would put 110 in the test set and 124 in training, and test nothing. `data.split_rules` holds out
 whole classes.
 
+## Renting a GPU
+
+The Mac does about 1.3 s a step. A 5090 should be far faster, and the data is made as the model
+trains, so there is nothing to upload. Find a machine and read the price with
+`nix run nixpkgs#vastai -- search offers 'gpu_name=RTX_5090 num_gpus=1 reliability>0.98' -o dph`.
+Then clone the repo on a PyTorch image and run `scripts/rent_eca.sh` (see its header). It checks the
+tests, times a short smoke run, and then runs RoPE against learned positions on two seeds.
+
 ## Notes
 
 The plan, the reasons and the related work are in the research notes (`research/dimension-worlds`).

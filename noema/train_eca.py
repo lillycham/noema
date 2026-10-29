@@ -60,6 +60,7 @@ def main():
     p.add_argument("--learned-positions", action="store_true", help="a position table in place of RoPE")
     p.add_argument("--no-qk-norm", action="store_true")
     p.add_argument("--slow-ca", action="store_true", help="use reference_step, until step() is written")
+    p.add_argument("--compile", action="store_true", help="train through torch.compile: for CUDA")
     p.add_argument("--log-every", type=int, default=250)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--tag", default="run")
@@ -74,7 +75,10 @@ def main():
     cfg = gpt.Config(vocab=tokens.VOCAB, block=L, emb=args.emb, heads=args.heads, layers=args.layers,
                      rope=not args.learned_positions, qk_norm=not args.no_qk_norm)
     model = gpt.GPT(cfg).to(args.device)
-    opt = torch.optim.AdamW(gpt.param_groups(model, args.wd), lr=args.lr, betas=(0.9, 0.95))
+    if args.device == "cuda":
+        torch.set_float32_matmul_precision("high")      # TF32 for the matrix multiplications
+    net = torch.compile(model) if args.compile else model      # same weights; save and sample from model
+    opt =torch.optim.AdamW(gpt.param_groups(model, args.wd), lr=args.lr, betas=(0.9, 0.95))
     mask = torch.from_numpy(tokens.target_mask(L, width)).to(args.device)
     seen = fixed_batch(train_rules, 1, 256, step_fn, args.device)
     unseen = fixed_batch(held_rules, 2, 256, step_fn, args.device) if args.heldout else None
@@ -84,16 +88,16 @@ def main():
     t = time.time()
     for step in range(args.steps + 1):
         if step % args.log_every == 0 or step == args.steps:
-            loss, acc = evaluate.score(model, seen, mask, width)
+            loss, acc = evaluate.score(net, seen, mask, width)
             line = f"step {step:5d}  val loss {loss:.4f}  acc {acc.mean():.3f}"
             if unseen is not None:
-                loss_h, acc_h = evaluate.score(model, unseen, mask, width)
+                loss_h, acc_h = evaluate.score(net, unseen, mask, width)
                 line += f"  | held-out rules: loss {loss_h:.4f}  acc {acc_h.mean():.3f}"
             print(f"{line}  ({time.time() - t:.0f}s)", flush=True)
         if step == args.steps:
             break
         X, _ = data.rollout_batch(rng, args.batch, train_rules, step_fn=step_fn)
-        train_step(model, opt, torch.from_numpy(X).to(args.device), mask, lr_at(step, args.steps, args.lr, args.warmup))
+        train_step(net, opt, torch.from_numpy(X).to(args.device), mask, lr_at(step, args.steps, args.lr, args.warmup))
 
     print("\naccuracy by row, seen rules:  " + " ".join(f"{a:.2f}" for a in acc))
     if unseen is not None:
