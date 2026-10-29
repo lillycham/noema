@@ -43,3 +43,32 @@ def complete(model, prefix, width, temperature=0.0, generator=None):
                 nxt = torch.multinomial((logits / temperature).softmax(-1), 1, generator=generator)
         X = torch.cat([X, nxt], dim=1)
     return X
+
+def neighbourhoods(rows, radius=1):
+    """The neighbourhood number of every cell of rows (..., W), as ca.reference_step counts it: the
+    cell at offset o from the one in question counts for 2^(radius - o)."""
+    rows = np.asarray(rows).astype(np.int64)
+    return sum(np.roll(rows, -o, axis=-1) << (radius - o) for o in range(-radius, radius + 1))
+
+def ideal_accuracy_by_row(grid, radius=1):
+    """The accuracy of an ideal table-lookup learner on rows 1 to n - 1 of grid (B, n, W) of 0 and 1,
+    as an array of n - 1: the curve for the model to be held against.
+
+    The learner knows only that a rule is a table, from neighbourhood number to new cell, and that
+    its entries are fair coins. When it has to predict a cell, it has seen every transition in the rows
+    above and in the cells to the left in the row it is writing. If it has met this cell's neighbourhood
+    number in those, it is certain: 1.0. If not, it can only guess: 0.5. So the curve is how fast a
+    sequence reveals its own rule, and no model can beat it on random tables, which radius 2 has.
+    (At radius 1 there are only 256 rules, and a model that knows them can do better, because a few
+    entries of the table then give away the rest.)
+    """
+    nb = neighbourhoods(np.asarray(grid)[:, :-1], radius)             # (B, n - 1, W): row t, as read to make row t + 1
+    B, T, W = nb.shape
+    known = np.zeros((T, B, W))
+    for b in range(B):
+        for t in range(T):
+            met = set(nb[b, :t].ravel().tolist())                      # all the transitions of the rows above
+            for i in range(W):
+                known[t, b, i] = nb[b, t, i] in met
+                met.add(nb[b, t, i])                                    # the cell just written
+    return (0.5 + 0.5 * known).mean(axis=(1, 2))

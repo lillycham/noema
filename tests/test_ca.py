@@ -102,3 +102,58 @@ def test_step_wraps_round_the_edge():
 def test_step_draws_a_sierpinski_triangle():
     rows = ca.rollout(single_one(), 90, 4)
     assert ones_at(rows[3]) == {4, 6, 8, 10}
+
+# ---------- radius 2: a cell looks two places each way, a rule has 32 bits ----------
+SHIFT_LEFT_2, SHIFT_RIGHT_2, KEEP_2 = 0xAAAAAAAA, 0xFFFF0000, 0xF0F0F0F0
+
+def test_reference_radius_2_rules_that_copy_a_cell():
+    """The cell at offset o counts for 2^(2 - o). The right neighbour but one counts 1, so the new cell
+    is that one when the rule has bit n set for every odd n: 0xAAAAAAAA. The left one counts 16 (0xFFFF0000)
+    and the cell itself counts 4 (0xF0F0F0F0)."""
+    row = random_rows(W)
+    assert np.array_equal(ca.reference_step(row, SHIFT_LEFT_2, 2), np.roll(row, -2))
+    assert np.array_equal(ca.reference_step(row, SHIFT_RIGHT_2, 2), np.roll(row, 2))
+    assert np.array_equal(ca.reference_step(row, KEEP_2, 2), row)
+
+def test_reference_radius_1_is_what_radius_1_always_was():
+    row = random_rows((3, W))
+    rules = np.array([30, 90, 110])
+    assert np.array_equal(ca.reference_step(row, rules, 1), ca.reference_step(row, rules))
+
+def test_mirror_and_complement_undo_themselves_at_radius_2():
+    rng = np.random.default_rng(0)
+    for rule in rng.integers(0, 2 ** 32, size=50).tolist():
+        assert ca.mirror(ca.mirror(rule, 2), 2) == rule
+        assert ca.complement(ca.complement(rule, 2), 2) == rule
+
+def test_a_mirror_rule_makes_the_mirror_world_at_radius_2():
+    row, rule = random_rows(W), 0x9E3779B9
+    assert np.array_equal(ca.reference_step(row, rule, 2)[::-1],
+                          ca.reference_step(row[::-1], ca.mirror(rule, 2), 2))
+
+def test_a_complement_rule_makes_the_inverted_world_at_radius_2():
+    row, rule = random_rows(W), 0x9E3779B9
+    assert np.array_equal(1 - ca.reference_step(row, rule, 2),
+                          ca.reference_step(1 - row, ca.complement(rule, 2), 2))
+
+def test_the_twins_of_a_radius_2_rule_are_at_most_four():
+    assert 1 <= len(ca.equivalent_rules(0x9E3779B9, 2)) <= 4
+    assert ca.equivalent_rules(KEEP_2, 2) <= {KEEP_2, ca.mirror(KEEP_2, 2), ca.complement(KEEP_2, 2)}
+
+def test_rollout_passes_the_radius_on():
+    first = random_rows((2, W))
+    rows = ca.rollout(first, np.array([SHIFT_LEFT_2, SHIFT_RIGHT_2]), 3, ca.reference_step, radius=2)
+    assert np.array_equal(rows[0, 1], np.roll(first[0], -2)) and np.array_equal(rows[1, 2], np.roll(first[1], 4))
+
+def test_step_matches_reference_at_radius_2():
+    """YOUR step(rows, rules, radius=1), for 300 random 32-bit rules. Watch for uint8 overflow in the
+    neighbourhood number, and for how far an int64 can be shifted."""
+    rng = np.random.default_rng(0)
+    for rule in rng.integers(0, 2 ** 32, size=300).tolist():
+        rows = random_rows((4, W), seed=rule % 1000)
+        assert np.array_equal(ca.step(rows, rule, 2), ca.reference_step(rows, rule, 2)), f"rule {rule}"
+
+def test_step_with_one_radius_2_rule_for_each_row_of_a_batch():
+    rows = random_rows((4, 3, W))
+    rules = np.random.default_rng(1).integers(0, 2 ** 32, size=(4, 3))
+    assert np.array_equal(ca.step(rows, rules, 2), ca.reference_step(rows, rules, 2))

@@ -46,6 +46,15 @@ is the same automaton as 124, 137 and 193. The 256 rules are 88 classes. A split
 would put 110 in the test set and 124 in training, and test nothing. `data.split_rules` holds out
 whole classes.
 
+## Radius 2
+
+`--radius 2` makes a cell look two places each way: a rule is 32 bits, so there are 2^32 of them,
+and no model can have learned any of them. A held-out rule is then really a new rule. One transition
+on 15 cells shows only about half of the 32 neighbourhood types, so the rule has to be collected
+across several rows. `evaluate.ideal_accuracy_by_row` is the curve of an ideal learner that keeps a
+table of every transition it has seen and guesses the rest. At radius 2 it starts at 0.59 and
+reaches 1.00 by row 9, and the model is held against it. A run prints both.
+
 ## Renting a GPU
 
 The Mac does about 1.3 s a step. A 5090 should be far faster, and the data is made as the model

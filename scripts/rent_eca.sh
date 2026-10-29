@@ -19,7 +19,7 @@ SMOKE_STEPS=${SMOKE_STEPS:-100}
 SEEDS=${SEEDS:-"0 1"}
 VARIANTS=${VARIANTS:-"rope positions"}  # rope: RoPE. positions: a learned table in its place
 PIP=${PIP:-1}                           # 0: the packages are there already (the Mac)
-EXTRA=${EXTRA:-}                        # more arguments for train_eca, e.g. "--emb 32 --heads 2 --layers 2"
+EXTRA=${EXTRA:-}                        # more arguments for train_eca, e.g. "--radius 2" or "--emb 32 --heads 2 --layers 2"
 
 set -u
 cd "$(dirname "$0")/.."

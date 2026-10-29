@@ -51,3 +51,45 @@ def test_no_held_out_rule_has_a_mirror_or_complement_in_training():
 def test_the_split_is_the_same_every_time():
     (a, b), (c, d) = data.split_rules(32), data.split_rules(32)
     assert np.array_equal(a, c) and np.array_equal(b, d)
+
+# ---------- radius 2: too many rules to list ----------
+def test_radius_1_rule_set_is_the_explicit_split():
+    rs = data.RuleSet(1, 32)
+    train, held = data.split_rules(32)
+    assert set(rs.train(np.random.default_rng(0), 500).tolist()) <= set(train.tolist())
+    assert set(rs.held(np.random.default_rng(0), 500).tolist()) <= set(held.tolist())
+
+def test_radius_2_train_rules_are_never_held_out_and_held_ones_always_are():
+    rs, rng = data.RuleSet(2), np.random.default_rng(0)
+    assert not any(rs.is_held_out(r) for r in rs.train(rng, 300).tolist())
+    assert all(rs.is_held_out(r) for r in rs.held(rng, 40).tolist())
+
+def test_radius_2_rules_are_32_bit_numbers():
+    rs, rng = data.RuleSet(2), np.random.default_rng(0)
+    rules = rs.train(rng, 300)
+    assert rules.min() >= 0 and rules.max() < 2 ** 32 and rules.max() > 2 ** 30      # they use the whole range
+
+def test_radius_2_twins_are_held_out_together():
+    """The hash is of the class, so a rule and its mirror and complement are all in or all out."""
+    rs, rng = data.RuleSet(2), np.random.default_rng(1)
+    for rule in rng.integers(0, 2 ** 32, size=200).tolist():
+        assert len({rs.is_held_out(twin) for twin in ca.equivalent_rules(rule, 2)}) == 1
+
+def test_about_one_radius_2_rule_in_sixteen_is_held_out():
+    rs = data.RuleSet(2)
+    rules = np.random.default_rng(2).integers(0, 2 ** 32, size=3000).tolist()
+    share = sum(rs.is_held_out(r) for r in rules) / len(rules)
+    assert 0.03 < share < 0.10
+
+def test_the_seed_changes_which_radius_2_rules_are_held_out():
+    a, b = data.RuleSet(2, seed=0), data.RuleSet(2, seed=1)
+    rules = np.random.default_rng(3).integers(0, 2 ** 32, size=500).tolist()
+    assert [a.is_held_out(r) for r in rules] != [b.is_held_out(r) for r in rules]
+
+def test_a_radius_2_batch_follows_the_radius_2_rule():
+    rs = data.RuleSet(2)
+    X, rules = data.rollout_batch(np.random.default_rng(0), 3, rs.train, step_fn=ca.reference_step, radius=2)
+    rows = tokens.decode(X, W)
+    for i in range(3):
+        for r in range(R - 1):
+            assert np.array_equal(rows[i, r + 1], ca.reference_step(rows[i, r], int(rules[i]), 2))

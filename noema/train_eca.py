@@ -42,9 +42,12 @@ def train_step(model, opt, X, mask, lr):
     opt.step()
     return loss.item()
 
-def fixed_batch(rules, seed, B, step_fn, device):
-    X, _ = data.rollout_batch(np.random.default_rng(seed), B, rules, step_fn=step_fn)
+def fixed_batch(rules, seed, B, step_fn, device, radius=1):
+    X, _ = data.rollout_batch(np.random.default_rng(seed), B, rules, step_fn=step_fn, radius=radius)
     return torch.from_numpy(X).to(device)
+
+def row_curve(values):
+    return " ".join(f"{a:.2f}" for a in values)
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -55,7 +58,10 @@ def main():
     p.add_argument("--warmup", type=int, default=100)
     for name, default in (("emb", 192), ("heads", 6), ("layers", 6)):
         p.add_argument(f"--{name}", type=int, default=default)
-    p.add_argument("--heldout", type=int, default=32, help="rules kept out of training (default 32)")
+    p.add_argument("--radius", type=int, default=1,
+                   help="how far a cell looks each way (default 1: 256 rules; 2: 2^32 rules, none can be memorised)")
+    p.add_argument("--heldout", type=int, default=32,
+                   help="radius 1: rules kept out of training, in whole classes (default 32). From radius 2 on, 1 class in 16")
     p.add_argument("--prompt-rows", type=int, default=3, help="rows given before the model writes (default 3)")
     p.add_argument("--learned-positions", action="store_true", help="a position table in place of RoPE")
     p.add_argument("--no-qk-norm", action="store_true")
@@ -70,7 +76,7 @@ def main():
     step_fn = ca.reference_step if args.slow_ca else None
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
-    train_rules, held_rules = data.split_rules(args.heldout)
+    rules = data.RuleSet(args.radius, args.heldout)
     width, L = data.WIDTH, data.ROWS * (data.WIDTH + 1)
     cfg = gpt.Config(vocab=tokens.VOCAB, block=L, emb=args.emb, heads=args.heads, layers=args.layers,
                      rope=not args.learned_positions, qk_norm=not args.no_qk_norm)
@@ -78,12 +84,13 @@ def main():
     if args.device == "cuda":
         torch.set_float32_matmul_precision("high")      # TF32 for the matrix multiplications
     net = torch.compile(model) if args.compile else model      # same weights; save and sample from model
-    opt =torch.optim.AdamW(gpt.param_groups(model, args.wd), lr=args.lr, betas=(0.9, 0.95))
+    opt = torch.optim.AdamW(gpt.param_groups(model, args.wd), lr=args.lr, betas=(0.9, 0.95))
     mask = torch.from_numpy(tokens.target_mask(L, width)).to(args.device)
-    seen = fixed_batch(train_rules, 1, 256, step_fn, args.device)
-    unseen = fixed_batch(held_rules, 2, 256, step_fn, args.device) if args.heldout else None
-    print(f"{gpt.n_parameters(model):,} parameters on {args.device}; {len(train_rules)} rules to train on,"
-          f" {len(held_rules)} held out; {cfg}", flush=True)
+    seen = fixed_batch(rules.train, 1, 256, step_fn, args.device, args.radius)
+    unseen = fixed_batch(rules.held, 2, 256, step_fn, args.device, args.radius) if args.heldout else None
+    print(f"{gpt.n_parameters(model):,} parameters on {args.device}; radius {args.radius}; {cfg}", flush=True)
+    ideal = evaluate.ideal_accuracy_by_row(tokens.decode(seen.cpu().numpy(), width), args.radius)
+    print(f"ideal table-lookup learner, by row:  {row_curve(ideal)}  (mean {ideal.mean():.3f})", flush=True)
 
     t = time.time()
     for step in range(args.steps + 1):
@@ -96,26 +103,32 @@ def main():
             print(f"{line}  ({time.time() - t:.0f}s)", flush=True)
         if step == args.steps:
             break
-        X, _ = data.rollout_batch(rng, args.batch, train_rules, step_fn=step_fn)
+        X, _ = data.rollout_batch(rng, args.batch, rules.train, step_fn=step_fn, radius=args.radius)
         train_step(net, opt, torch.from_numpy(X).to(args.device), mask, lr_at(step, args.steps, args.lr, args.warmup))
 
-    print("\naccuracy by row, seen rules:  " + " ".join(f"{a:.2f}" for a in acc))
+    print(f"\nideal learner, by row:        {row_curve(ideal)}")
+    print(f"accuracy by row, seen rules:  {row_curve(acc)}")
     if unseen is not None:
-        print("accuracy by row, held out:    " + " ".join(f"{a:.2f}" for a in acc_h))
+        print(f"accuracy by row, held out:    {row_curve(acc_h)}")
 
-    # Rollouts: the model gets the first rows and writes the rest.
-    rule_numbers = np.array([r for r, _ in SHOWN])
-    first = np.random.default_rng(args.seed + 7).integers(0, 2, size=(len(SHOWN), width), dtype=np.uint8)
-    truth = ca.rollout(first, rule_numbers, data.ROWS, step_fn)
+    # Rollouts: the model gets the first rows and writes the rest. At radius 1, six famous rules. From
+    # radius 2 on, there are no famous ones: three rules it trained on and three held out.
+    if args.radius == 1:
+        shown = SHOWN
+    else:
+        draw = np.random.default_rng(args.seed + 5)
+        shown = [(int(r), "random") for r in (*rules.train(draw, 3), *rules.held(draw, 3))]
+    rule_numbers = np.array([r for r, _ in shown])
+    first = np.random.default_rng(args.seed + 7).integers(0, 2, size=(len(shown), width), dtype=np.uint8)
+    truth = ca.rollout(first, rule_numbers, data.ROWS, step_fn, args.radius)
     prefix = torch.from_numpy(tokens.encode(truth[:, :args.prompt_rows])).to(args.device)
     written = tokens.decode(evaluate.complete(model, prefix, width).cpu().numpy(), width)
-    held = set(held_rules.tolist())
-    items = [(r, truth[i], written[i], f"{name}, {'held out' if r in held else 'seen'}")
-             for i, (r, name) in enumerate(SHOWN)]
+    items = [(r, truth[i], written[i], f"{name}, {'held out' if rules.is_held_out(r) else 'seen'}")
+             for i, (r, name) in enumerate(shown)]
     out = Path("runs")
     out.mkdir(exist_ok=True)
     render.save_rollouts(items, out / f"eca_{args.tag}_rollouts.png", args.prompt_rows)
-    print(f"\nrule 110, truth then model:\n{render.show(truth[2])}\n\n{render.show(written[2])}")
+    print(f"\nrule {shown[2][0]}, truth then model:\n{render.show(truth[2])}\n\n{render.show(written[2])}")
     checkpoints = Path("checkpoints")
     checkpoints.mkdir(exist_ok=True)
     torch.save({"config": cfg.__dict__, "weights": model.state_dict()}, checkpoints / f"eca_{args.tag}.pt")

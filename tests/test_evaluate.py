@@ -55,3 +55,36 @@ def test_complete_only_writes_cells_and_is_the_same_every_time_when_greedy():
 def test_a_model_that_knows_the_answer_completes_the_true_rollout():
     X = batch()
     assert torch.equal(evaluate.complete(Oracle(X), X[:, :2 * (W + 1)], W), X)
+
+# ---------- the ideal table-lookup learner ----------
+def test_neighbourhood_numbers_are_the_ones_the_reference_step_reads():
+    row = np.array([[1, 0, 0, 1, 1, 0, 1, 0]])
+    n1 = evaluate.neighbourhoods(row, 1)
+    assert n1[0, 0] == 4 * row[0, -1] + 2 * row[0, 0] + row[0, 1]               # wraps round the edge
+    n2 = evaluate.neighbourhoods(row, 2)
+    assert n2.min() >= 0 and n2.max() < 32
+    assert n2[0, 3] == 16 * row[0, 1] + 8 * row[0, 2] + 4 * row[0, 3] + 2 * row[0, 4] + row[0, 5]
+
+def test_neighbourhood_numbers_reproduce_the_rule():
+    """Reading bit n of the rule at the neighbourhood number is the step itself."""
+    rng = np.random.default_rng(0)
+    rows = rng.integers(0, 2, size=(5, W), dtype=np.uint8)
+    for rule in (0x9E3779B9, 0x1234ABCD):
+        want = ca.reference_step(rows, rule, 2)
+        assert np.array_equal((rule >> evaluate.neighbourhoods(rows, 2)) & 1, want)
+
+def test_ideal_learner_on_an_all_zero_world_has_one_unknown_cell_then_none():
+    """Every neighbourhood is 0. In the first row it knows the cell after the first one: 14 of 15 cells."""
+    grid = np.zeros((4, R, W), dtype=np.uint8)
+    ideal = evaluate.ideal_accuracy_by_row(grid, 1)
+    assert ideal.shape == (R - 1,)
+    assert ideal[0] == np.float64(0.5 + 0.5 * 14 / 15)
+    assert (ideal[1:] == 1.0).all()
+
+def test_ideal_learner_on_random_radius_2_rules_climbs_with_the_rows():
+    rs = data.RuleSet(2)
+    X, _ = data.rollout_batch(np.random.default_rng(0), 64, rs.train, step_fn=ca.reference_step, radius=2)
+    ideal = evaluate.ideal_accuracy_by_row(tokens.decode(X, W), 2)
+    assert (ideal >= 0.5).all() and (ideal <= 1.0).all()
+    assert ideal[0] < 0.75 and ideal[-1] > 0.9 and ideal[-1] > ideal[0] + 0.2
+    assert (np.diff(ideal) > -0.02).all()                       # the rows never tell it less than before
