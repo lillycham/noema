@@ -113,3 +113,17 @@ def test_a_2d_checkpoint_is_read_back_with_its_grid(tmp_path):
     path = tmp_path / "w.pt"
     torch.save({"config": cfg.__dict__, "weights": gpt.GPT(cfg).state_dict(), "side": 3, "frames": 4}, path)
     assert circuit.load(path).world == {"side": 3, "frames": 4}
+
+def test_attention_by_cell_finds_the_cells_a_head_looks_back_from():
+    """A head that looks 3 tokens back only for queries that predict cell 1: all of its attention at that
+    distance is counted under cell 1, and none under the others."""
+    cells, frames = 4, 3
+    T = frames * (cells + 1)
+    weights = torch.zeros(1, 1, T, T)
+    for q in range(3, T):
+        if (q + 1) % (cells + 1) == 1:                       # the token it predicts is cell 1 of its frame
+            weights[0, 0, q, q - 3] = 1.0
+    sums, counts = circuit.attention_by_cell(weights, 3, cells)
+    mean = (sums / counts)[0]
+    assert mean[1] == 1.0 and mean[[0, 2, 3]].eq(0).all()
+    assert counts[1] == 2                                    # frames 1 and 2 only: the first has no transitions

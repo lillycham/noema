@@ -121,6 +121,22 @@ def offset_profile(weights, ids, max_offset=40):
         out[:, d] = (diag * mask).sum((0, 2)) / live.sum()
     return out
 
+def attention_by_cell(weights, distance, cells):
+    """For each cell of a frame (the one the query predicts), the attention at one distance back, summed over
+    the batch and the frames from the second on: (sums (heads, cells), counts (cells,)). Divide to get the mean.
+    The query that predicts cell i is the token before it, so the first cell is predicted from the separator."""
+    B, H, T, _ = weights.shape
+    diag = weights.diagonal(offset=-distance, dim1=-2, dim2=-1)                       # (B, H, T - distance): query q, key q - distance
+    predicted = torch.arange(distance, T) + 1                                         # the token each of these queries predicts
+    frame, cell = predicted // (cells + 1), predicted % (cells + 1)
+    live = (frame >= 1) & (cell < cells)
+    sums, counts = torch.zeros(H, cells), torch.zeros(cells)
+    for i in range(cells):
+        pick = live & (cell == i)
+        sums[:, i] = diag[:, :, pick].sum((0, 2))
+        counts[i] = pick.sum() * B
+    return sums, counts
+
 def load(path, device="cpu"):
     """The model of a checkpoint. A 2D checkpoint also leaves its grid in model.world."""
     ck = torch.load(path, map_location=device)
@@ -175,6 +191,22 @@ def analyse(model, X, ids, cells, chunk=32, names=None, max_offset=40):
                 table[l, h] = evaluate.score(model, X, mask, cells)[1].mean()
     print_table("accuracy with one head zeroed", table)
 
+def print_by_cell(model, X, side, specs, chunk, names):
+    """For each LAYER:HEAD:DISTANCE in specs, the mean attention at that distance, as a picture of the grid:
+    the number at (row, column) is for queries that predict that cell."""
+    cells = side * side
+    for spec in specs:
+        layer, head, distance = (int(v) for v in spec.split(":"))
+        sums, counts = torch.zeros(cells), torch.zeros(cells)
+        for part in X.split(chunk):
+            s, c = attention_by_cell(all_patterns(model, part)[layer][:, head:head + 1], distance, cells)
+            sums, counts = sums + s[0], counts + c
+        grid = (sums / counts).reshape(side, side).numpy()
+        print(f"L{layer}H{head} at distance {distance}" + (f" ({names[distance]})" if distance in names else ""))
+        for row in grid:
+            print("   " + " ".join(f"{v:5.2f}" for v in row))
+        print()
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("checkpoint")
@@ -182,6 +214,9 @@ def main():
     p.add_argument("--n", type=int, default=128)
     p.add_argument("--chunk", type=int, default=32)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--by-cell", action="append", metavar="LAYER:HEAD:DISTANCE", default=[],
+                   help="2D only: instead of the usual pictures, draw the attention of that head at that distance back "
+                        "for each cell it predicts. Repeat for more heads")
     args = p.parse_args()
 
     model = load(args.checkpoint)
@@ -191,6 +226,8 @@ def main():
         X, _ = data2d.rollout_batch(rng, args.n, data2d.RuleSet().held, side, side, frames)
         ids = torch.from_numpy(transition_ids_2d(data2d.to_frames(X, side, side)))
         cells, names, reach = side * side, named_offsets_2d(side, side), side * side + (side - 1) * side + 5
+        if args.by_cell:
+            return print_by_cell(model, torch.from_numpy(X), side, args.by_cell, args.chunk, names)
     else:
         X, _ = data.rollout_batch(rng, args.n, data.RuleSet(args.radius).held, radius=args.radius)
         ids = torch.from_numpy(transition_ids(tokens.decode(X, data.WIDTH), args.radius))
