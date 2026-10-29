@@ -21,6 +21,8 @@ This is step 1. Nothing here is language: the tokens are `0`, `1` and a row sepa
 | `noema/data.py`      | Random rule and first row, rolled out. Whole classes of rules held out        |
 | `noema/gpt.py`       | The model: RMSNorm, RoPE, QK-norm, SwiGLU, no biases                          |
 | `noema/evaluate.py`  | Loss, accuracy row by row, and a rollout the model writes itself              |
+| `noema/free_running.py` | A model that writes alone, against an ideal learner that does the same      |
+| `noema/circuit.py`   | Which heads gather the neighbourhood and which look up the rule               |
 | `noema/render.py`    | Rollouts as text and as pictures                                              |
 | `noema/train_eca.py` | The training script                                                           |
 | `tests/`             | Tiny models on the CPU, a few seconds. `test_ca.py` checks your `step()`      |
