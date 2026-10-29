@@ -37,13 +37,16 @@ def test_a_probe_reads_a_label_that_is_in_the_features_and_not_one_that_is_not()
     noise = rng.normal(size=(3000, 11))
     assert probe.probe_accuracy(noise[:2000], y[:2000], noise[2000:], y[2000:], 11) < 0.2
 
-def test_fourier_r2_is_high_for_a_circular_code_at_one_frequency_only():
+def test_fourier_share_is_flat_for_a_one_hot_code_and_peaked_for_a_circular_one():
     rng = np.random.default_rng(1)
-    y = rng.integers(0, 11, size=3000)
+    y = rng.integers(0, 11, size=4000)
+    one_hot = np.eye(11)[y] + 0.05 * rng.normal(size=(4000, 11))
+    s = probe.fourier_share(one_hot, y, 11)
+    assert s.shape == (5,) and abs(s.sum() - 1) < 1e-9 and s.max() < 0.3
     angle = 2 * np.pi * 2 * y / 11
-    F = np.stack([np.cos(angle), np.sin(angle)], -1) + 0.05 * rng.normal(size=(3000, 2))
-    r = probe.fourier_r2(F[:2000], y[:2000], F[2000:], y[2000:], 11)
-    assert r.argmax() == 1 and r[1] > 0.9 and r[[0, 2, 3, 4]].max() < 0.3
+    circle = np.stack([np.cos(angle), np.sin(angle)], -1) + 0.05 * rng.normal(size=(4000, 2))
+    c = probe.fourier_share(circle, y, 11)
+    assert c.argmax() == 1 and c[1] > 0.95
 
 def test_targets_are_the_position_the_velocity_and_the_next_position_on_each_axis():
     model, X = model_and_batch(B=4)

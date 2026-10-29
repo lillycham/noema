@@ -13,9 +13,12 @@ with seen velocities, and on ones with held-out velocities. Only about 8 velocit
 out, so few values of each coordinate occur there, and a constant guess can beat or lose to 1 / SIZE
 by luck. The held-out scores are read next to the number of distinct values (printed).
 
-The Fourier scores ask a sharper question. Regress cos and sin of 2 pi k n / SIZE on the stream,
-for each frequency k, and report R^2. A model that adds mod SIZE with a circular code (as the
-modular addition models of Nanda et al. do) should show a few frequencies much higher than the rest.
+The Fourier share asks a sharper question. Take the mean stream vector for each value n of a
+quantity (11 vectors), centre them, and take the DFT along n. The power at frequency k, as a share of
+the total, says how much of the code is a wave of period SIZE / k. A one-hot code, one direction for
+each n, spreads its power evenly (1 / 5 for each of 5 frequencies). A circular code, as in the
+modular-addition models of Nanda et al., puts most of it in a few. (A ridge fit to cos and sin
+cannot tell the two apart: any function of n is linear in a one-hot code.)
 
 A probe says the information is there and linearly readable. It does not say the model uses it.
 """
@@ -60,16 +63,16 @@ def probe_accuracy(train_F, train_y, test_F, test_y, classes):
     predict = ridge_fit(train_F, np.eye(classes)[train_y])
     return float((predict(test_F).argmax(-1) == test_y).mean())
 
-def fourier_r2(train_F, train_y, test_F, test_y, size):
-    """R^2 on test of a ridge probe to (cos, sin) of 2 pi k y / size, for k = 1 .. size // 2: an array of them."""
-    out = []
-    for k in range(1, size // 2 + 1):
-        angle = lambda y: 2 * np.pi * k * y / size
-        predict = ridge_fit(train_F, np.stack([np.cos(angle(train_y)), np.sin(angle(train_y))], -1))
-        target = np.stack([np.cos(angle(test_y)), np.sin(angle(test_y))], -1)
-        err = ((predict(test_F) - target) ** 2).sum()
-        out.append(1 - err / ((target - target.mean(0)) ** 2).sum())
-    return np.array(out)
+def fourier_share(F, y, size):
+    """The share of the power of the class means that sits at each frequency k = 1 .. size // 2: an
+    array that sums to 1. F (N, emb) stream vectors, y (N,) labels in 0 .. size - 1. The mean vector
+    of each label is centred over the labels, and its DFT along the label is taken; k and size - k
+    are the same wave, so they are counted together."""
+    means = np.stack([F[y == n].mean(0) for n in range(size)])
+    means = means - means.mean(0)
+    power = (np.abs(np.fft.fft(means, axis=0)) ** 2).sum(-1)               # (size,)
+    folded = power[1:size // 2 + 1] * np.where(np.arange(1, size // 2 + 1) * 2 == size, 1, 2)
+    return folded / folded.sum()
 
 def collect(model, X, dim, size, steps, axis, first=2):
     """Features (L, N, emb) at the query for coordinate `axis` of steps first + 1 .. steps - 1, and the
@@ -110,11 +113,16 @@ def main():
         for name, (F, T) in sets.items():
             distinct = {q: len(np.unique(T[q])) for q in quantities}
             print(f"\naxis {axis}, probe accuracy on {name} velocities (chance {1 / size:.2f}; distinct values {distinct})")
-            print("layer  " + "  ".join(f"{q:>9}" for q in quantities) + "   | Fourier R^2 of next, k = 1 .. " + str(size // 2))
+            print("layer  " + "  ".join(f"{q:>9}" for q in quantities))
             for layer in range(len(Ftr)):
                 acc = [probe_accuracy(Ftr[layer], Ttr[q], F[layer], T[q], size) for q in quantities]
-                r = fourier_r2(Ftr[layer], Ttr["next"], F[layer], T["next"], size)
-                print(f"{layer:5d}  " + "  ".join(f"{x:9.2f}" for x in acc) + "   | " + " ".join(f"{x:5.2f}" for x in r))
+                print(f"{layer:5d}  " + "  ".join(f"{x:9.2f}" for x in acc))
+        print(f"\naxis {axis}, share of the power of the class means at k = 1 .. {size // 2}"
+              f" (a one-hot code gives {1 / (size // 2):.2f} each), on the seen-velocity trajectories")
+        for q in quantities:
+            print(f"  {q}:")
+            for layer in range(2, len(Ftr)):
+                print(f"    layer {layer}: " + " ".join(f"{x:5.2f}" for x in fourier_share(sets["seen"][0][layer], sets["seen"][1][q], size)))
 
 if __name__ == "__main__":
     main()
