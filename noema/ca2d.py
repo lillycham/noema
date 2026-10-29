@@ -118,3 +118,12 @@ def equivalent_rules(rule):
     any mix: at most 16, this one included."""
     others = {transform(rule, s) for s in range(len(SYMMETRIES))}
     return others | {ca.complement(r, 2) for r in others}
+
+def neighbourhoods(grids):
+    """The neighbourhood number of every cell of grids (..., H, W), as reference_step counts it.
+    The new grid is bit n of the rule at each of these, so this is step() before the rule is read."""
+    grids = np.asarray(grids).astype(np.int64)
+    n = np.zeros_like(grids)
+    for di, dj in CELLS:
+        n = (n << 1) | np.roll(grids, shift=(-di, -dj), axis=(-2, -1))
+    return n
