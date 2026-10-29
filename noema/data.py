@@ -29,6 +29,12 @@ def split_rules(n_heldout=32, seed=0):
         held |= classes[i]
     return np.array(sorted(set(range(256)) - held)), np.array(sorted(held))
 
+def held_out_by_hash(representative, seed=0):
+    """Whether a class of rules is held out, from a number that is the same for every rule in it:
+    a hash whose top 4 bits are 0, so 1 class in 16. A different seed holds out different classes."""
+    mixed = ((representative ^ (seed * 0x9E3779B1)) * 0x9E3779B97F4A7C15) % 2 ** 64
+    return mixed >> 60 == 0
+
 class RuleSet:
     """The rules a run trains on and the ones it holds out, at one radius.
 
@@ -51,9 +57,7 @@ class RuleSet:
     def is_held_out(self, rule):
         if self.radius == 1:
             return int(rule) in self._held_set
-        rep = min(ca.equivalent_rules(int(rule), self.radius))      # the same for every twin
-        mixed = ((rep ^ (self.seed * 0x9E3779B1)) * 0x9E3779B97F4A7C15) % 2 ** 64
-        return mixed >> 60 == 0                                      # the top 4 bits are 0: 1 in 16
+        return held_out_by_hash(min(ca.equivalent_rules(int(rule), self.radius)), self.seed)     # min: the same for every twin
 
     def _draw(self, rng, B, held):
         out = []

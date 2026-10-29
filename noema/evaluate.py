@@ -62,7 +62,11 @@ def ideal_accuracy_by_row(grid, radius=1):
     (At radius 1 there are only 256 rules, and a model that knows them can do better, because a few
     entries of the table then give away the rest.)
     """
-    nb = neighbourhoods(np.asarray(grid)[:, :-1], radius)             # (B, n - 1, W): row t, as read to make row t + 1
+    return ideal_accuracy_from(neighbourhoods(np.asarray(grid)[:, :-1], radius))
+
+def ideal_accuracy_from(nb):
+    """ideal_accuracy_by_row for any world, from nb (B, T, N): the neighbourhood number of each of the
+    N cells of a row (or frame) t, in the order the model writes them, as read to make row t + 1."""
     B, T, W = nb.shape
     known = np.zeros((T, B, W))
     for b in range(B):
