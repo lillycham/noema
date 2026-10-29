@@ -72,3 +72,44 @@ def test_offset_profile_finds_a_head_that_looks_a_fixed_distance_back():
         weights[0, 0, q, max(q - 2, 0)] = 1.0
     prof = circuit.offset_profile(weights, ids, max_offset=4)
     assert prof[0].argmax() == 2
+
+# ---------- the 2D world ----------
+from noema import ca2d, data2d
+
+def test_2d_transition_ids_are_the_neighbourhoods_of_each_frame():
+    X, _ = data2d.rollout_batch(np.random.default_rng(0), 3, data2d.RuleSet().train)
+    frames = data2d.to_frames(X)
+    ids = circuit.transition_ids_2d(frames).reshape(3, data2d.FRAMES, -1)
+    C = data2d.HEIGHT * data2d.WIDTH
+    assert (ids[:, 0] == -1).all() and (ids[:, :, C] == -1).all()
+    assert np.array_equal(ids[:, 1:, :C].reshape(3, -1, data2d.HEIGHT, data2d.WIDTH), ca2d.neighbourhoods(frames[:, :-1]))
+
+def test_the_named_distances_are_where_the_neighbours_are_in_the_tokens():
+    """The query that predicts cell (r, c) of frame t + 1 is the token before it. The cell above, in
+    frame t, is C + W tokens back, and so on. Checked in the middle of the grid, where nothing wraps."""
+    H, W = 5, 5
+    C, stride = H * W, H * W + 1
+    names = circuit.named_offsets_2d(H, W)
+    where = {"up": (-1, 0), "left": (0, -1), "self": (0, 0), "right": (0, 1), "down": (1, 0)}
+    r, c, t = 2, 2, 3
+    query = (t + 1) * stride + r * W + c - 1
+    for d, name in names.items():
+        if name in where:
+            dr, dc = where[name]
+            assert query - d == t * stride + (r + dr) * W + (c + dc)
+
+def test_the_wrapped_distances_are_where_the_wrapped_neighbours_are():
+    H, W = 5, 5
+    C, stride = H * W, H * W + 1
+    names = {v: k for k, v in circuit.named_offsets_2d(H, W).items()}
+    t = 2
+    for (r, c), name, (nr, nc) in (((1, 0), "left, wrapped", (1, W - 1)), ((1, W - 1), "right, wrapped", (1, 0)),
+                                   ((0, 2), "up, wrapped", (H - 1, 2)), ((H - 1, 2), "down, wrapped", (0, 2))):
+        query = (t + 1) * stride + r * W + c - 1
+        assert query - names[name] == t * stride + nr * W + nc
+
+def test_a_2d_checkpoint_is_read_back_with_its_grid(tmp_path):
+    cfg = gpt.Config(vocab=tokens.VOCAB, block=4 * 10, emb=32, heads=2, layers=2)
+    path = tmp_path / "w.pt"
+    torch.save({"config": cfg.__dict__, "weights": gpt.GPT(cfg).state_dict(), "side": 3, "frames": 4}, path)
+    assert circuit.load(path).world == {"side": 3, "frames": 4}
