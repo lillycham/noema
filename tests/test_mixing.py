@@ -3,7 +3,7 @@ advance() against reference_advance().
 
     pytest tests/test_mixing.py
 
-The tests of advance() fail until Lilly writes it.
+advance() is written by Claude (73750d0), at Lilly's word.
 """
 import numpy as np
 
