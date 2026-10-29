@@ -18,20 +18,10 @@ batch. In a batch, every row can have its own rule.
 import numpy as np
 
 def step(rows, rules):
-    """The next rows. rows (..., W) of 0 and 1. rules is a rule number, or an array with one rule
-    number for each row: the shape of rows without its last axis. Returns the same shape as rows.
-
-    TODO(Lilly): the new rows, in three moves.
-      1. Every cell's neighbours: the rows shifted one place each way, wrapping round the edge.
-         np.roll does the wrapping. Which sign of shift gives the left neighbour?
-      2. The neighbourhood number n = 4*left + 2*itself + right, for every cell: 0 to 7.
-      3. The new cell is bit n of its rule number: (rule >> n) & 1.
-         With one rule for each row of a batch, rules needs a new last axis to line up with the
-         cells: np.asarray(rules)[..., None].
-    Check by eye first: rule 90 from a single 1 should draw a Sierpinski triangle (show() in
-    render.py prints a rollout).
-    """
-    raise NotImplementedError
+    left = np.roll(rows, 1, axis=-1)
+    right = np.roll(rows, -1, axis=-1)
+    n = 4 * left + 2 * rows + right
+    return (np.asarray(rules)[..., None] >> n) & 1
 
 def reference_step(rows, rules):
     """The slow version of step(): one cell at a time, with the definition written out."""
