@@ -30,6 +30,9 @@ from noema import ca
 CELLS = ((-1, 0), (0, -1), (0, 0), (0, 1), (1, 0))       # (row, column) offsets: up, left, itself, right, down
 
 def step(grids, rules):
+    """The next grids, for whole batches at once: grids (..., H, W), and one rule for each grid or one
+    for all. The neighbourhood number is built a bit at a time, one rolled copy of the grid for each
+    cell in CELLS, and the new cell is bit n of the rule."""
     grids = np.asarray(grids)
     rules = np.broadcast_to(
         np.asarray(rules, dtype=np.int64),

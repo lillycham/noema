@@ -1,11 +1,9 @@
-"""The 2D automaton. The first groups check reference_step() and the symmetries, and need nothing
-from you. The last group checks your step() against reference_step(): it is marked as expected to
-fail until step() in noema/ca2d.py is written, and then it should pass.
+"""The 2D automaton. The first groups check reference_step() and the symmetries. The last group
+checks step() against reference_step().
 
     pytest tests/test_ca2d.py
 """
 import numpy as np
-import pytest
 
 from noema import ca, ca2d
 
@@ -91,27 +89,21 @@ def test_a_class_has_up_to_16_rules_and_contains_its_own_complement():
         assert rule in cls and ca.complement(rule, 2) in cls and len(cls) <= 16
         assert all(ca2d.equivalent_rules(other) == cls for other in cls)       # every member gives the same class
 
-# ---------- your step() ----------
-yours = pytest.mark.xfail(raises=NotImplementedError, reason="step() in noema/ca2d.py is yours to write")
-
-@yours
+# ---------- step() ----------
 def test_step_matches_the_reference_on_a_batch_with_a_rule_each():
     g = random_grids((5, H, W))
     rules = np.random.default_rng(2).integers(0, 2 ** 32, size=5)
     assert np.array_equal(ca2d.step(g, rules), ca2d.reference_step(g, rules))
 
-@yours
 def test_step_matches_the_reference_on_one_grid_with_one_rule():
     g = random_grids((H, W), 3)
     assert np.array_equal(ca2d.step(g, 0x9E3779B9), ca2d.reference_step(g, 0x9E3779B9))
 
-@yours
 def test_step_moves_a_picture_when_the_rule_copies_a_neighbour():
     g = random_grids((H, W), 4)
     for weight, shift, axis in ((16, 1, 0), (1, -1, 0), (8, 1, 1), (2, -1, 1)):
         assert np.array_equal(ca2d.step(g, copy_of(weight)), np.roll(g, shift, axis=axis))
 
-@yours
 def test_step_gives_a_whole_batch_of_frames():
     g = random_grids((2, 3, H, W), 5)                          # two batch axes
     rules = np.arange(6, dtype=np.int64).reshape(2, 3) * 123456789
