@@ -57,11 +57,20 @@ reaches 1.00 by row 9, and the model is held against it. A run prints both.
 
 ## Renting a GPU
 
-The Mac does about 1.3 s a step. A 5090 should be far faster, and the data is made as the model
-trains, so there is nothing to upload. Find a machine and read the price with
-`nix run nixpkgs#vastai -- search offers 'gpu_name=RTX_5090 num_gpus=1 reliability>0.98' -o dph`.
-Then clone the repo on a PyTorch image and run `scripts/rent_eca.sh` (see its header). It checks the
-tests, times a short smoke run, and then runs RoPE against learned positions on two seeds.
+The Mac does about 1.3 s a step. A 5090 does about 20 ms, and the data is made as the model trains,
+so there is nothing to upload. Find a machine with
+`nix run nixpkgs#vastai -- search offers 'gpu_name=RTX_5090 num_gpus=1 reliability>0.98' -o dph`
+(add `--raw` to see the price). A 5090 needs CUDA 12.8 or newer: `pytorch/pytorch:2.8.0-cuda12.9-cudnn9-runtime`
+worked, with a 20 GB disk.
+
+Clone the repo on the box and run `EXTRA="--radius 2" scripts/rent_eca.sh` (see its header). It installs
+gcc if it can, because `torch.compile` needs a compiler and that image has none. Then it checks the
+tests, times a short smoke run, and runs RoPE against learned positions on two seeds. The model is so
+small that one GPU can run several of these at once.
+
+Destroy the instance as soon as the results are copied back. The command asks y/N, so in a script:
+`echo y | nix run nixpkgs#vastai -- destroy instance ID`. The first radius-2 run took 17 minutes and cost
+about $0.12.
 
 ## Notes
 

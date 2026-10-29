@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One rental on a 5090: the cellular automaton runs, RoPE against learned positions.
 #
-# On the rented machine (a PyTorch image), from the repo root after cloning:
+# On the rented machine, from the repo root after cloning. A 5090 needs CUDA 12.8 or newer, so use a
+# PyTorch image like pytorch/pytorch:2.8.0-cuda12.9-cudnn9-runtime (it worked, with a 20 GB disk):
 #   nohup scripts/rent_eca.sh > logs/rent.log 2>&1 < /dev/null &
 #   tail -f logs/rent/status.txt            # one line per step: ok, FAILED or skipped
 #   cat logs/rent/summary.txt               # the last scores of every run, once they are done
@@ -28,7 +29,20 @@ STATUS=$LOG/status.txt
 SUMMARY=$LOG/summary.txt
 mkdir -p "$LOG" runs checkpoints
 CUDA=$(python -c "import torch; print(int(torch.cuda.is_available()))")
-if [ "$CUDA" = 1 ]; then COMPILE=--compile; else COMPILE=; fi
+COMPILE=
+if [ "$CUDA" = 1 ]; then
+    # torch.compile needs a C compiler to build its kernels, and the PyTorch "runtime" images have none.
+    # So install gcc when it is missing and we can. If there is still none, train without compiling.
+    if ! command -v gcc > /dev/null && command -v apt-get > /dev/null; then
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq > "$LOG/apt.log" 2>&1 \
+            && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gcc >> "$LOG/apt.log" 2>&1
+    fi
+    if command -v gcc > /dev/null; then
+        COMPILE=--compile
+    else
+        echo "$(date +%H:%M:%S) no C compiler, so no --compile: slower, but it works" | tee -a "$STATUS"
+    fi
+fi
 
 step() {    # step NAME OUTPUT COMMAND...: run COMMAND, unless OUTPUT exists ("" = always run)
     local name=$1 out=$2; shift 2
