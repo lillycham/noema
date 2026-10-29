@@ -17,10 +17,12 @@ batch. In a batch, every row can have its own rule.
 """
 import numpy as np
 
-def step(rows, rules):
-    left = np.roll(rows, 1, axis=-1)
-    right = np.roll(rows, -1, axis=-1)
-    n = 4 * left + 2 * rows + right
+def step(rows, rules, radius=1):
+    n = np.zeros_like(rows, dtype=np.int64)
+
+    for offset in range(-radius, radius + 1):
+        n = (n << 1) | np.roll(rows, -offset, axis=-1)
+
     return (np.asarray(rules)[..., None] >> n) & 1
 
 def reference_step(rows, rules, radius=1):
