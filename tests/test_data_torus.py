@@ -70,3 +70,10 @@ def test_a_model_scores_chance_before_training_and_score_has_the_right_shape():
     model = gpt.GPT(gpt.Config(vocab=dt.VOCAB, block=X.shape[1], emb=32, heads=2, layers=2))
     loss, acc = score(model, torch.from_numpy(X), torch.from_numpy(dt.target_mask(X.shape[1], DIM)), DIM, SIZE)
     assert acc.shape == (STEPS - 1,) and abs(loss - np.log(dt.VOCAB)) < 0.5
+
+def test_accuracy_by_axis_has_one_number_for_each_step_and_axis():
+    from noema.train_torus import accuracy_by_axis
+    X, _ = batch(B=8)
+    model = gpt.GPT(gpt.Config(vocab=dt.VOCAB, block=X.shape[1], emb=32, heads=2, layers=2))
+    a = accuracy_by_axis(model, torch.from_numpy(X), DIM, SIZE)
+    assert a.shape == (3, DIM) and (a >= 0).all() and (a <= 1).all()

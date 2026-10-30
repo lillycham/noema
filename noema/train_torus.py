@@ -35,6 +35,18 @@ def score(model, X, mask, dim, size):
                for t in range(1, X.shape[1] // stride)]
     return loss, np.array(by_step)
 
+@torch.no_grad()
+def accuracy_by_axis(model, X, dim, size, steps_at=(2, 3, 4)):
+    """Accuracy of the model's best guess for each axis of the positions p_t, for the steps in steps_at:
+    an array (len(steps_at), dim). Teacher-forced: coordinate a of p_t is predicted with the true earlier
+    coordinates of p_t in front of it. (The later axes are helped by the earlier ones: in 2D, the
+    x of a new turn fixes the y.)"""
+    model.eval()
+    pred = model(X[:, :-1]).argmax(-1)
+    stride = dim + 1
+    return np.array([[(pred[:, t * stride + a - 1] == X[:, t * stride + a]).float().mean().item()
+                      for a in range(dim)] for t in steps_at])
+
 class World:
     """What a run is trained on: batch(rng, B, held) -> tokens (B, L), the held-out part if held, and
     ideal(X) -> the ideal learner's accuracy by step on a batch of tokens X."""
@@ -112,6 +124,8 @@ def main():
         train_step(net, opt, torch.from_numpy(X).to(args.device), mask, lr_at(step, args.steps, args.lr, args.warmup))
 
     print(f"\nideal learner, by step:         {row_curve(ideal)}")
+    print(f"accuracy by axis at steps 2, 3, 4 (rows), seen:     " + " | ".join(row_curve(r) for r in accuracy_by_axis(net, seen, args.dim, args.size)))
+    print(f"accuracy by axis at steps 2, 3, 4 (rows), held out: " + " | ".join(row_curve(r) for r in accuracy_by_axis(net, unseen, args.dim, args.size)))
     print(f"accuracy by step, seen:         {row_curve(acc)}")
     print(f"accuracy by step, held out:     {row_curve(acc_h)}")
     Path("checkpoints").mkdir(exist_ok=True)
