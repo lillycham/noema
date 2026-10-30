@@ -46,8 +46,9 @@ def trajectory_batch(rng, B, turns, size=SIZE, dim=DIM, steps=STEPS, advance_fn=
     v0 = rng.integers(0, size, size=(B, dim))
     return dt.encode(mixing.trajectory(starts, v0, chosen, steps, size, advance_fn)), chosen
 
-def ideal_accuracy_by_step(positions, group, size):
+def ideal_accuracy_by_step(positions, group, size, condition=True):
     """The accuracy per coordinate of an ideal learner on steps 1 to T - 1 of positions (B, T, d): an array of T - 1.
+    With condition=False it does not look at the coordinates of the step it is writing.
 
     The ideal learner knows the world: the velocity turns by one of the matrices in `group`, all equally
     likely, and the first velocity is any. At step t it has seen the velocities v_0 .. v_(t-2). It keeps
@@ -68,7 +69,7 @@ def ideal_accuracy_by_step(positions, group, size):
         acc = []
         for a in range(d):
             ok_a = ok.copy()
-            for b in range(a):
+            for b in range(a if condition else 0):
                 ok_a &= nxt[:, :, b] == true_v[:, b][:, None]
             counts = np.stack([(ok_a & (nxt[:, :, a] == value)).sum(-1) for value in range(size)], axis=-1)   # (B, size)
             top = counts.max(-1, keepdims=True)
