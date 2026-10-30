@@ -35,6 +35,7 @@ def main():
     p.add_argument("--learned-positions", action="store_true", help="a position table in place of RoPE")
     p.add_argument("--no-qk-norm", action="store_true")
     p.add_argument("--compile", action="store_true", help="train through torch.compile: for CUDA")
+    p.add_argument("--init", help="start from the weights of this checkpoint, to compare with a run from scratch")
     p.add_argument("--log-every", type=int, default=500)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--tag", default="mixed")
@@ -49,6 +50,8 @@ def main():
     cfg = gpt.Config(vocab=args.size + 1, block=L, emb=args.emb, heads=args.heads, layers=args.layers,
                      rope=not args.learned_positions, qk_norm=not args.no_qk_norm)
     model = gpt.GPT(cfg).to(args.device)
+    if args.init:
+        model.load_state_dict(torch.load(args.init, map_location=args.device)["weights"])
     if args.device == "cuda":
         torch.set_float32_matmul_precision("high")
     net = torch.compile(model) if args.compile else model
