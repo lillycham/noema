@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from noema import ca2d, data2d, evaluate, gpt, render, tokens
+from noema import ca2d, data2d, data_count, evaluate, gpt, render, tokens
 from noema.train_eca import default_device, lr_at, row_curve, train_step
 
 def fixed_batch(rules, seed, B, args):
@@ -36,6 +36,8 @@ def main():
     p.add_argument("--prompt-frames", type=int, default=2, help="frames given before the model writes (default 2)")
     p.add_argument("--learned-positions", action="store_true", help="a position table in place of RoPE")
     p.add_argument("--no-qk-norm", action="store_true")
+    p.add_argument("--count-rules", action="store_true", help="only rules that count (see data_count.py)")
+    p.add_argument("--init", help="start from the weights of this checkpoint: the score at step 0 is the zero-shot one")
     p.add_argument("--compile", action="store_true", help="train through torch.compile: for CUDA")
     p.add_argument("--log-every", type=int, default=250)
     p.add_argument("--seed", type=int, default=0)
@@ -45,12 +47,14 @@ def main():
 
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
-    rules = data2d.RuleSet()
+    rules = data_count.CountRuleSet() if args.count_rules else data2d.RuleSet()
     cells = args.side * args.side
     L = args.frames * (cells + 1)
     cfg = gpt.Config(vocab=tokens.VOCAB, block=L, emb=args.emb, heads=args.heads, layers=args.layers,
                      rope=not args.learned_positions, qk_norm=not args.no_qk_norm)
     model = gpt.GPT(cfg).to(args.device)
+    if args.init:
+        model.load_state_dict(torch.load(args.init, map_location=args.device)["weights"])
     if args.device == "cuda":
         torch.set_float32_matmul_precision("high")
     net = torch.compile(model) if args.compile else model
@@ -62,6 +66,11 @@ def main():
           f"{args.frames} frames, {L} tokens; {cfg}", flush=True)
     ideal = data2d.ideal_accuracy_by_frame(data2d.to_frames(seen.cpu().numpy(), args.side, args.side))
     print(f"ideal table-lookup learner, by frame:  {row_curve(ideal)}  (mean {ideal.mean():.3f})", flush=True)
+    if args.count_rules:
+        grids = data2d.to_frames(seen.cpu().numpy(), args.side, args.side)
+        numbers = ca2d.neighbourhoods(grids[:, :-1]).reshape(len(grids), args.frames - 1, cells)
+        counting = data_count.count_ideal_from(numbers)
+        print(f"ideal learner that knows rules count: {row_curve(counting)}  (mean {counting.mean():.3f})", flush=True)
 
     t = time.time()
     for step in range(args.steps + 1):

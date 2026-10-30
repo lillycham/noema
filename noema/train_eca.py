@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from noema import ca, data, evaluate, gpt, render, tokens
+from noema import ca, data, data_count, evaluate, gpt, render, tokens
 
 SHOWN = [(30, "chaotic"), (90, "Sierpinski"), (110, "complex"), (184, "traffic"), (54, "complex"), (22, "chaotic")]
 
@@ -62,6 +62,7 @@ def main():
                    help="how far a cell looks each way (default 1: 256 rules; 2: 2^32 rules, none can be memorised)")
     p.add_argument("--heldout", type=int, default=32,
                    help="radius 1: rules kept out of training, in whole classes (default 32). From radius 2 on, 1 class in 16")
+    p.add_argument("--count-rules", action="store_true", help="only rules that count (see data_count.py); radius 2")
     p.add_argument("--prompt-rows", type=int, default=3, help="rows given before the model writes (default 3)")
     p.add_argument("--learned-positions", action="store_true", help="a position table in place of RoPE")
     p.add_argument("--no-qk-norm", action="store_true")
@@ -76,7 +77,7 @@ def main():
     step_fn = ca.reference_step if args.slow_ca else None
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
-    rules = data.RuleSet(args.radius, args.heldout)
+    rules = data_count.CountRuleSet() if args.count_rules else data.RuleSet(args.radius, args.heldout)
     width, L = data.WIDTH, data.ROWS * (data.WIDTH + 1)
     cfg = gpt.Config(vocab=tokens.VOCAB, block=L, emb=args.emb, heads=args.heads, layers=args.layers,
                      rope=not args.learned_positions, qk_norm=not args.no_qk_norm)
@@ -91,6 +92,9 @@ def main():
     print(f"{gpt.n_parameters(model):,} parameters on {args.device}; radius {args.radius}; {cfg}", flush=True)
     ideal = evaluate.ideal_accuracy_by_row(tokens.decode(seen.cpu().numpy(), width), args.radius)
     print(f"ideal table-lookup learner, by row:  {row_curve(ideal)}  (mean {ideal.mean():.3f})", flush=True)
+    if args.count_rules:
+        counting = data_count.count_ideal(tokens.decode(seen.cpu().numpy(), width))
+        print(f"ideal learner that knows rules count: {row_curve(counting)}  (mean {counting.mean():.3f})", flush=True)
 
     t = time.time()
     for step in range(args.steps + 1):
