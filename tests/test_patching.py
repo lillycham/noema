@@ -73,3 +73,22 @@ def test_patching_every_head_of_a_layer_pair_gives_shares_that_are_finite():
     model, cs = tiny(), cases("down", 12)
     r = patching.patch_all(model, cs)
     assert r["denoise"].shape == (2, 2) and np.isfinite(r["denoise"]).all() and np.isfinite(r["noise"]).all()
+
+def test_a_wrapped_flip_changes_the_neighbourhood_of_the_edge_cell():
+    for direction in ("up", "left", "right", "down"):
+        cases = patching.make_cases(WORLD, np.random.default_rng(3), 8, direction, pool=2000, wrap=True)
+        side, stride = WORLD["side"], WORLD["side"] ** 2 + 1
+        for clean, corrupt, q in zip(cases["clean"].numpy(), cases["corrupt"].numpy(), cases["q"].tolist()):
+            flips = np.flatnonzero(clean != corrupt)
+            assert len(flips) == 1
+            assert q - flips[0] == patching.wrapped_distance(direction, side)
+            frame, cell = (q + 1) // stride, (q + 1) % stride
+            r, c = cell // side, cell % side
+            assert {"up": r == 0, "down": r == side - 1, "left": c == 0, "right": c == side - 1}[direction]
+
+def test_a_flip_in_1d_is_one_row_back_at_its_offset():
+    for offset in (-2, 0, 2):
+        cases = patching.make_cases_1d(np.random.default_rng(4), 8, offset, pool=2000)
+        for clean, corrupt, q in zip(cases["clean"].numpy(), cases["corrupt"].numpy(), cases["q"].tolist()):
+            flips = np.flatnonzero(clean != corrupt)
+            assert len(flips) == 1 and q - flips[0] == patching.WIDTH_1D - offset
