@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # The rung 5 batch, for shukka: free strides, and more seeds of the 2D world with checkpoints along the curve.
 #
-#   shukka run --job ./noema#smoke             a few cents on a small card: does it all run on this host?
-#   shukka run --job ./noema#rung5             the batch
+#   shukka run --job ./#smoke             a few cents on a small card: does it all run on this host?
+#   shukka run --job ./#rung5             the batch
 #
-# The flake gives PYTHONPATH and python. Everything is written under $SHUKKA_OUT, so it comes home with
+# The job in the flake gives PYTHONPATH and python. Everything is written under $SHUKKA_OUT, so it comes home with
 # the logs when the run ends, also when it fails. A failed run doesn't stop the others.
 #
 # Settings, as arguments: smoke | batch.  JOBS is how many runs share the GPU.

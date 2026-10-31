@@ -7,18 +7,21 @@
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
-      # For a rented GPU: the prebuilt CUDA PyTorch, so the host fetches it and compiles nothing.
-      rented = import nixpkgs { system = "x86_64-linux"; config.allowUnfree = true; };
-      rentedPython = rented.python3.withPackages (ps: [ ps.numpy ps.torch-bin ps.matplotlib ]);
-      batch = mode: rented.writeShellApplication {
-        name = "noema-${mode}";
-        runtimeInputs = [ rentedPython rented.gcc rented.findutils rented.coreutils ];
-        text = ''
-          export PYTHONPATH=${self}
-          exec ${rented.bash}/bin/bash ${self}/scripts/rent_rung5.sh ${mode}
-        '';
+      # A stock PyTorch image for rented GPUs: the host compiles nothing. Nix would build all of CUDA there,
+      # as it is unfree and so not in the public cache. The code comes from GitHub, so push the branch first.
+      rent = mode: disk: maxDuration: gpu: {
+        image = "pytorch/pytorch:2.8.0-cuda12.9-cudnn9-runtime";
+        entrypoint = [ "bash" "-c" ''
+          set -eu
+          export PATH=/opt/conda/bin:$PATH
+          python -c "import urllib.request as u; u.urlretrieve('https://codeload.github.com/lillycham/noema/tar.gz/refs/heads/feat/rung5', '/tmp/noema.tgz')"
+          mkdir -p /tmp/noema && tar xzf /tmp/noema.tgz --strip-components=1 -C /tmp/noema
+          python -m pip install -q numpy matplotlib
+          DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gcc
+          PYTHONPATH=/tmp/noema exec bash /tmp/noema/scripts/rent_rung5.sh ${mode}
+        '' ];
+        inherit gpu disk maxDuration;
       };
-      needs = { minVram = 8; minCuda = 13.0; };  # torch-bin here is the cu130 wheel
     in
     {
       devShells = forAllSystems (pkgs:
@@ -35,15 +38,10 @@
           };
         });
 
-      apps.x86_64-linux = {
-        smoke = { type = "app"; program = "${batch "smoke"}/bin/noema-smoke"; };
-        rung5 = { type = "app"; program = "${batch "batch"}/bin/noema-batch"; };
-      };
-
       # shukka jobs: what each run needs. What to pay for it is the policy of whoever runs it.
       shukkaJobs = {
-        smoke = { app = "smoke"; gpu = needs // { models = [ "RTX_3060" "RTX_3070" "RTX_3080" ]; }; disk = 30; maxDuration = "30m"; };
-        rung5 = { app = "rung5"; gpu = needs // { minVram = 24; models = [ "RTX_5090" "RTX_4090" ]; }; disk = 40; maxDuration = "90m"; };
+        smoke = rent "smoke" 30 "20m" { minVram = 8; minCuda = 12.9; models = [ "RTX_3060" "RTX_3070" "RTX_3080" ]; };
+        rung5 = rent "batch" 40 "90m" { minVram = 24; minCuda = 12.9; models = [ "RTX_5090" "RTX_4090" ]; };
       };
     };
 }
