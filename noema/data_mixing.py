@@ -17,16 +17,24 @@ from noema import data_torus as dt, mixing
 
 SIZE, DIM, STEPS = dt.SIZE, dt.DIM, dt.STEPS
 
+# The x-y quarter turns that negate z, an inverse pair. With these trained, their twins (z kept) are the
+# held-out quarter turns of a plane that has been seen, whose inverses have not.
+XY_PAIR = np.array([[[0, 1, 0], [-1, 0, 0], [0, 0, -1]], [[0, -1, 0], [1, 0, 0], [0, 0, -1]]])
+
 class TurnSet:
     """The turns a run trains on and the ones it holds out. train() never returns a held-out turn,
     and held() returns only held-out ones. A turn is a (d, d) signed permutation matrix."""
 
-    def __init__(self, dim=DIM, seed=0):
+    def __init__(self, dim=DIM, seed=0, also_train=None):
+        """also_train (n, dim, dim): held-out turns to train on after all, for a split that differs in just these."""
         self.dim, self.seed = dim, seed
         self.group = mixing.signed_permutations(dim)
         order = np.random.default_rng(seed).permutation(len(self.group))
         n_held = max(1, len(self.group) // 4)
         self.held_turns, self.train_turns = self.group[order[:n_held]], self.group[order[n_held:]]
+        if also_train is not None:
+            moved = (self.held_turns[:, None] == also_train[None]).all((-1, -2)).any(1)
+            self.held_turns, self.train_turns = self.held_turns[~moved], np.concatenate([self.train_turns, self.held_turns[moved]])
 
     def is_held_out(self, turn):
         return any((np.asarray(turn) == h).all() for h in self.held_turns)

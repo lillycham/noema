@@ -54,3 +54,8 @@ def test_the_ideal_learner_has_to_guess_at_first_and_is_nearly_certain_later():
     c = dm.ideal_accuracy_by_step(dt.decode(X, DIM), mixing.signed_permutations(DIM), SIZE)
     assert c.shape == (STEPS - 1,) and c[0] == 1 / SIZE
     assert c[1] < 0.6 and c[-1] > 0.9
+
+def test_also_train_moves_only_those_turns():
+    plain, moved = dm.TurnSet(3), dm.TurnSet(3, also_train=dm.XY_PAIR)
+    assert len(moved.held_turns) == len(plain.held_turns) - 2 and len(moved.train_turns) == len(plain.train_turns) + 2
+    assert all(plain.is_held_out(R) and not moved.is_held_out(R) for R in dm.XY_PAIR)

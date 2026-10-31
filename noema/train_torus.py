@@ -54,7 +54,7 @@ class World:
     def __init__(self, args):
         size, dim, steps = args.size, args.dim, args.steps_per_seq
         if args.mixing:
-            self.pieces = dm.TurnSet(dim)
+            self.pieces = dm.TurnSet(dim, also_train=dm.XY_PAIR if args.xy_pair else None)
             advance_fn = mixing.reference_advance if args.slow_world else None
             self.batch = lambda rng, B, held: dm.trajectory_batch(
                 rng, B, self.pieces.held if held else self.pieces.train, size, dim, steps, advance_fn)[0]
@@ -84,6 +84,7 @@ def main():
     p.add_argument("--learned-positions", action="store_true", help="a position table in place of RoPE")
     p.add_argument("--no-qk-norm", action="store_true")
     p.add_argument("--mixing", action="store_true", help="the world of mixing.py: the velocity turns every step")
+    p.add_argument("--xy-pair", action="store_true", help="3D: train on dm.XY_PAIR, which the usual split holds out")
     p.add_argument("--slow-world", action="store_true", help="use the reference step of the world (torus.reference_advance, or mixing.reference_advance)")
     p.add_argument("--compile", action="store_true", help="train through torch.compile: for CUDA")
     p.add_argument("--log-every", type=int, default=250)

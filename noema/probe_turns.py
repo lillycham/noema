@@ -63,9 +63,10 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("checkpoints", nargs="+")
     p.add_argument("--n", type=int, default=512)
+    p.add_argument("--xy-pair", action="store_true", help="for checkpoints trained with --xy-pair")
     args = p.parse_args()
     dim = 3
-    pieces = dm.TurnSet(dim)
+    pieces = dm.TurnSet(dim, also_train=dm.XY_PAIR if args.xy_pair else None)
     rng = np.random.default_rng(11)
     X, R = dm.trajectory_batch(rng, 4 * args.n, pieces.group, dt.SIZE, dim, dt.STEPS)
     P = dt.decode(X, dim)
