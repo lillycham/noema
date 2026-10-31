@@ -39,12 +39,12 @@ def decode(tokens, dim):
         raise ValueError("a step does not end in a separator")
     return steps[..., :dim].astype(np.int64)
 
-def target_mask(length, dim):
+def target_mask(length, dim, stride=None):
     """Which targets count in the loss for a sequence of this length. The targets are tokens[1:], so
     entry i is the token at position i + 1. True for the coordinates of the second step and later.
-    Not the first step, which is random, and not the separators."""
+    Not the first step, which is random, and not the separators. stride defaults to dim + 1."""
     position = np.arange(1, length)
-    stride = dim + 1
+    stride = stride or dim + 1
     return (position >= stride) & (position % stride < dim)
 
 class VelocitySet:

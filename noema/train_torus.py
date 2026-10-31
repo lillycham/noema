@@ -21,15 +21,15 @@ from noema import data_mixing as dm, data_torus as dt, gpt, mixing, torus
 from noema.train_eca import default_device, lr_at, row_curve, train_step
 
 @torch.no_grad()
-def score(model, X, mask, dim, size):
+def score(model, X, mask, dim, size, stride=None):
     """(loss, accuracy by step) on a batch X (B, L) of token IDs: the share of coordinates in step t
-    that the model's best guess gets right, for t = 1 to steps - 1."""
+    that the model's best guess gets right, for t = 1 to steps - 1. stride defaults to dim + 1."""
     model.eval()
     logits = model(X[:, :-1])
     targets = X[:, 1:]
     loss = gpt.masked_cross_entropy(logits, targets, mask).item()
     right = (logits[..., :size].argmax(-1) == targets).float()
-    stride = dim + 1
+    stride = stride or dim + 1
     position = torch.arange(1, X.shape[1], device=X.device)
     by_step = [right[:, (position // stride == t) & (position % stride < dim)].mean().item()
                for t in range(1, X.shape[1] // stride)]

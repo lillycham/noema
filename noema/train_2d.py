@@ -38,6 +38,7 @@ def main():
     p.add_argument("--no-qk-norm", action="store_true")
     p.add_argument("--count-rules", action="store_true", help="only rules that count (see data_count.py)")
     p.add_argument("--init", help="start from the weights of this checkpoint: the score at step 0 is the zero-shot one")
+    p.add_argument("--save-at", type=int, nargs="*", default=[], help="also save the weights at these steps, to look along the curve")
     p.add_argument("--compile", action="store_true", help="train through torch.compile: for CUDA")
     p.add_argument("--log-every", type=int, default=250)
     p.add_argument("--seed", type=int, default=0)
@@ -79,6 +80,10 @@ def main():
             loss_h, acc_h = evaluate.score(net, unseen, mask, cells)
             print(f"step {step:5d}  val loss {loss:.4f}  acc {acc.mean():.3f}  | held-out rules: "
                   f"loss {loss_h:.4f}  acc {acc_h.mean():.3f}  ({time.time() - t:.0f}s)", flush=True)
+        if step in args.save_at:
+            Path("checkpoints").mkdir(exist_ok=True)
+            torch.save({"config": cfg.__dict__, "weights": model.state_dict(), "side": args.side, "frames": args.frames},
+                       Path("checkpoints") / f"world2d_{args.tag}_at{step}.pt")
         if step == args.steps:
             break
         X, _ = data2d.rollout_batch(rng, args.batch, rules.train, args.side, args.side, args.frames)
