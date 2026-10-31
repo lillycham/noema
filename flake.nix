@@ -18,7 +18,7 @@
           exec ${rented.bash}/bin/bash ${self}/scripts/rent_rung5.sh ${mode}
         '';
       };
-      needs = { minVram = 8; minCuda = 12.8; };
+      needs = { minVram = 8; minCuda = 13.0; };  # torch-bin here is the cu130 wheel
     in
     {
       devShells = forAllSystems (pkgs:
